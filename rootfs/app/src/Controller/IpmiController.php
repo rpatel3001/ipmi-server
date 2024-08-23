@@ -262,7 +262,9 @@ class IpmiController
                     $response['success'] = true;
                     $response['sensors'] = $sensorData;
                     $response['states'] = $states;
-                    print "\n\n $sensorData \n\n $states \n\n";
+                    $tmp1 = implode(" \n", $sensorData);
+                    $tmp2 = implode(" \n", $states);
+                    print "\n\n $tmp1 \n\n $tmp2 \n\n";
                 } else {
                     $response['message'] = 'Wrong connection data provided!';
                 }
