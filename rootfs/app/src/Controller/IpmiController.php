@@ -14,7 +14,6 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Process\Process;
 class IpmiController
 {
-    private array $ipmiTypes = ["lanplus", "lan", "imb", "open"];
     private array $sensorTypes = [
         'temperature' => 'degrees C',
         'voltage' => 'Volts',
@@ -24,6 +23,7 @@ class IpmiController
     const COMMAND_TIMEOUT = 600;
     const DEFAULT_PORT = 623;
     const DEFAULT_USERNAME = 'ADMIN';
+    const DEFAULT_INTERFACE = 'lanplus';
 
     public function index(Request $request): JsonResponse
     {
@@ -98,13 +98,10 @@ class IpmiController
         $cmd = $this->getCommand($request);
 
         if ($cmd !== false) {
-            foreach ($this->ipmiTypes as $ipmi_type) {
-                $ret = $this->runCommand(array_merge($cmd, ['-I', $ipmi_type, 'chassis', 'power', $type]));
+            $ret = $this->runCommand(array_merge($cmd, ['chassis', 'power', $type]));
 
-                if ($ret) {
-                    $done = true;
-                    break;
-                }
+            if ($ret) {
+                $done = true;
             }
         }
 
@@ -149,12 +146,13 @@ class IpmiController
             'host' => $host,
             'port' => $query->get('port', self::DEFAULT_PORT),
             'user' => $query->get('user', self::DEFAULT_USERNAME),
-            'password' => $query->get('password', '')
+            'password' => $query->get('password', ''),
+            'interface' => $query->get('interface', self::DEFAULT_INTERFACE)
         ];
 
         $cmd = ['ipmitool'];
 
-        array_push($cmd, '-H', $ipmi['host'], '-p', $ipmi['port'], '-U', $ipmi['user'], '-P', $ipmi['password']);
+        array_push($cmd, '-H', $ipmi['host'], '-p', $ipmi['port'], '-U', $ipmi['user'], '-P', $ipmi['password'], '-I', $ipmi['interface']);
 
         return $cmd;
     }
@@ -176,29 +174,26 @@ class IpmiController
         }
         else {
             try {
-                foreach ($this->ipmiTypes as $ipmi_type) {
-                    $ret = $this->runCommand(array_merge($cmd, ['-I', $ipmi_type, 'bmc', 'info']));
+                $ret = $this->runCommand(array_merge($cmd, ['bmc', 'info']));
+
+                if ($ret) {
+                    $results = explode(PHP_EOL, $ret);
+                    $device = $this->extractValuesFromResults($results);
+
+                    $ret = $this->runCommand(array_merge($cmd, ['fru']));
 
                     if ($ret) {
                         $results = explode(PHP_EOL, $ret);
-                        $device = $this->extractValuesFromResults($results);
-
-                        $ret = $this->runCommand(array_merge($cmd, ['-I', $ipmi_type, 'fru']));
-
-                        if ($ret) {
-                            $results = explode(PHP_EOL, $ret);
-                            $device = array_merge($device, $this->extractValuesFromResults($results));
-                        }
-
-                        $ret = $this->runCommand(array_merge($cmd, ['-I', $ipmi_type, 'chassis', 'power', 'status']));
-
-                        if ($ret) {
-                            $on = (trim($ret) === "Chassis Power is on");
-                        }
-
-                        $found = true;
-                        break;
+                        $device = array_merge($device, $this->extractValuesFromResults($results));
                     }
+
+                    $ret = $this->runCommand(array_merge($cmd, ['chassis', 'power', 'status']));
+
+                    if ($ret) {
+                        $on = (trim($ret) === "Chassis Power is on");
+                    }
+
+                    $found = true;
                 }
 
                 if ($found) {
@@ -262,48 +257,45 @@ class IpmiController
                     $states = array_merge($states, $data['states']);
                 }
 
-                foreach ($this->ipmiTypes as $ipmi_type) {
-                    $ret = $this->runCommand(array_merge($cmd, ['-I', $ipmi_type, 'dcmi', 'power', 'reading']));
+                $ret = $this->runCommand(array_merge($cmd, ['dcmi', 'power', 'reading']));
 
-                    if ($ret) {
-                        // extract power usage
-                        $results = explode(PHP_EOL, $ret);
+                if ($ret) {
+                    // extract power usage
+                    $results = explode(PHP_EOL, $ret);
 
-                        if (!empty($results)) {
-                            foreach ($results as $result) {
-                                $extract = false;
-                                $sensorType = 'power';
+                    if (!empty($results)) {
+                        foreach ($results as $result) {
+                            $extract = false;
+                            $sensorType = 'power';
 
-                                if (!empty($result)) {
-                                    if (str_contains($result, 'Watts')) {
-                                        $values = array_map('trim', explode(':', $result));
-                                        [$description, $value] = $values;
-                                        $value = trim(str_replace('Watts', '', $value));
+                            if (!empty($result)) {
+                                if (str_contains($result, 'Watts')) {
+                                    $values = array_map('trim', explode(':', $result));
+                                    [$description, $value] = $values;
+                                    $value = trim(str_replace('Watts', '', $value));
+                                    $extract = true;
+                                } else if (str_contains($result, 'Seconds')) {
+                                    $description = 'Sampling period';
+                                    $pattern = "/" . $description . ":\K.+?(?=Seconds)/";
+                                    $success = preg_match($pattern, $result, $match);
+                                    $sensorType = 'time';
+
+                                    if ($success) {
                                         $extract = true;
-                                    } else if (str_contains($result, 'Seconds')) {
-                                        $description = 'Sampling period';
-                                        $pattern = "/" . $description . ":\K.+?(?=Seconds)/";
-                                        $success = preg_match($pattern, $result, $match);
-                                        $sensorType = 'time';
-
-                                        if ($success) {
-                                            $extract = true;
-                                            $value = trim($match[0]);
-                                        }
+                                        $value = trim($match[0]);
                                     }
+                                }
 
-                                    if ($extract) {
-                                        $id = $this->generateId($description);
-                                        $sensorData[$sensorType][$id] = $description;
-                                        $states[$id] = $value;
-                                    }
+                                if ($extract) {
+                                    $id = $this->generateId($description);
+                                    $sensorData[$sensorType][$id] = $description;
+                                    $states[$id] = $value;
                                 }
                             }
                         }
-
-                        $found = true;
-                        break;
                     }
+
+                    $found = true;
                 }
 
                 if ($found) {
@@ -330,33 +322,30 @@ class IpmiController
         $found = false;
 
         if ($cmd !== false) {
-            foreach ($this->ipmiTypes as $ipmi_type) {
-                $ret = $this->runCommand(array_merge($cmd, ['-I', $ipmi_type, 'sdr', 'type', $type]));
+            $ret = $this->runCommand(array_merge($cmd, ['sdr', 'type', $type]));
 
-                if ($ret) {
-                    $results = explode(PHP_EOL, $ret);
+            if ($ret) {
+                $results = explode(PHP_EOL, $ret);
 
-                    if (!empty($results)) {
-                        foreach ($results as $result) {
-                            if (!empty($result)) {
-                                $values = array_map('trim', explode('|', $result));
-                                [$description, $a, $b, $c, $value] = $values;
-                                $id = $this->generateId($description);
+                if (!empty($results)) {
+                    foreach ($results as $result) {
+                        if (!empty($result)) {
+                            $values = array_map('trim', explode('|', $result));
+                            [$description, $a, $b, $c, $value] = $values;
+                            $id = $this->generateId($description);
 
-                                if (str_contains($value, $unit)) {
-                                    $value = trim(str_replace($unit, '', $value));
-                                } else {
-                                    $value = null;
-                                }
-
-                                $sensors[$id] = $description;
-                                $states[$id] = $value;
+                            if (str_contains($value, $unit)) {
+                                $value = trim(str_replace($unit, '', $value));
+                            } else {
+                                $value = null;
                             }
-                        }
 
-                        $found = true;
-                        break;
+                            $sensors[$id] = $description;
+                            $states[$id] = $value;
+                        }
                     }
+
+                    $found = true;
                 }
             }
         }
