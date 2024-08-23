@@ -262,6 +262,7 @@ class IpmiController
                     $response['success'] = true;
                     $response['sensors'] = $sensorData;
                     $response['states'] = $states;
+                    print "\n\n $sensorData \n\n $states \n\n";
                 } else {
                     $response['message'] = 'Wrong connection data provided!';
                 }
@@ -302,6 +303,7 @@ class IpmiController
 
                             $sensors[$id] = $description;
                             $states[$id] = $value;
+                            print "$type \t $description = $value";
                         }
                     }
 
