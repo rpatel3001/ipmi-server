@@ -18,7 +18,8 @@ class IpmiController
         'temperature' => 'degrees C',
         'voltage' => 'Volts',
         'fan' => 'RPM',
-        'current' => 'Watts'
+        'power' => 'Watts',
+        'current' => 'Amps'
     ];
     private array $debug = [];
     const COMMAND_TIMEOUT = 600;
@@ -262,9 +263,6 @@ class IpmiController
                     $response['success'] = true;
                     $response['sensors'] = $sensorData;
                     $response['states'] = $states;
-                    $tmp1 = implode(" \n", $sensorData);
-                    $tmp2 = implode(" \n", $states);
-                    print "\n\n $tmp1 \n\n $tmp2 \n\n";
                 } else {
                     $response['message'] = 'Wrong connection data provided!';
                 }
@@ -285,7 +283,7 @@ class IpmiController
         $found = false;
 
         if ($cmd !== false) {
-            $ret = $this->runCommand(array_merge($cmd, ['sdr', 'type', $type]));
+            $ret = $this->runCommand(array_merge($cmd, ['sdr', 'list', 'full']));
 
             if ($ret) {
                 $results = explode(PHP_EOL, $ret);
@@ -294,18 +292,15 @@ class IpmiController
                     foreach ($results as $result) {
                         if (!empty($result)) {
                             $values = array_map('trim', explode('|', $result));
-                            [$description, $a, $b, $c, $value] = $values;
-                            $id = $this->generateId($description);
+                            [$description, $value, $a] = $values;
 
                             if (str_contains($value, $unit)) {
                                 $value = trim(str_replace($unit, '', $value));
-                            } else {
-                                $value = null;
+                                $id = $this->generateId($description);
+                                $sensors[$id] = $description;
+                                $states[$id] = $value;
                             }
 
-                            $sensors[$id] = $description;
-                            $states[$id] = $value;
-                            print "$type \t $description = $value";
                         }
                     }
 
