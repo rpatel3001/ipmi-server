@@ -149,12 +149,14 @@ class IpmiController
             'port' => $query->get('port', self::DEFAULT_PORT),
             'user' => $query->get('user', self::DEFAULT_USERNAME),
             'password' => $query->get('password', ''),
-            'interface' => $query->get('interface', self::DEFAULT_INTERFACE)
+            'interface' => $query->get('interface', self::DEFAULT_INTERFACE),
+            'extra' => $query->get('extra', '')
         ];
 
         $cmd = ['ipmitool'];
 
         array_push($cmd, '-H', $ipmi['host'], '-p', $ipmi['port'], '-U', $ipmi['user'], '-P', $ipmi['password'], '-I', $ipmi['interface']);
+        $cmd = array_merge($cmd, explode(' ', $ipmi['extra']));
 
         return $cmd;
     }
