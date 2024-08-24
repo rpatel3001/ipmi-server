@@ -271,8 +271,8 @@ class IpmiController
                                     if (str_contains($value, $unit)) {
                                         $value = trim(str_replace($unit, '', $value));
                                         $id = $this->generateId($description);
-                                        array_push($sensorData[$type], [$id => $description]);
-                                        array_push($states, [$id => $value]);
+                                        $sensorData[$type][$id] = $description;
+                                        $states[$id] = $value;
                                     }
                                 }
                             }
