@@ -245,20 +245,39 @@ class IpmiController
         ];
 
         $sensorData = [
-            'power' => [],
-            'time' => []
-        ];
+        'temperature' => [],
+        'voltage' => [],
+        'fan' => [],
+        'power' => [],
+        'current' => []
+    ];
         $states = [];
         $cmd = $this->getCommand($request);
         $found = false;
 
         if ($cmd !== false) {
             try {
-                foreach ($this->sensorTypes as $type => $unit) {
-                    $data = $this->getSensorsByType($request, $type, $unit);
-                    $found = $found || $data['found'];
-                    $sensorData[$type] = $data['sensors'];
-                    $states = array_merge($states, $data['states']);
+                $ret = $this->runCommand(array_merge($cmd, ['sdr', 'list', 'full']));
+                if ($ret) {
+                    $results = explode(PHP_EOL, $ret);
+                    if (!empty($results)) {
+                        foreach ($results as $result) {
+                            if (!empty($result)) {
+                                $found = true;
+                                $values = array_map('trim', explode('|', $result));
+                                [$description, $value, $a] = $values;
+    
+                                foreach ($this->sensorTypes as $type => $unit) {
+                                    if (str_contains($value, $unit)) {
+                                        $value = trim(str_replace($unit, '', $value));
+                                        $id = $this->generateId($description);
+                                        array_push($sensorData[$type], [$id => $description]);
+                                        array_push($states, [$id => $value]);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if ($found) {
@@ -275,48 +294,5 @@ class IpmiController
 
         return $response;
     }
-
-    private function getSensorsByType(Request $request, string $type, string $unit): array
-    {
-        $sensors = [];
-        $states = [];
-
-        $cmd = $this->getCommand($request);
-        $found = false;
-
-        if ($cmd !== false) {
-            $ret = $this->runCommand(array_merge($cmd, ['sdr', 'list', 'full']));
-
-            if ($ret) {
-                $results = explode(PHP_EOL, $ret);
-
-                if (!empty($results)) {
-                    foreach ($results as $result) {
-                        if (!empty($result)) {
-                            $values = array_map('trim', explode('|', $result));
-                            [$description, $value, $a] = $values;
-
-                            if (str_contains($value, $unit)) {
-                                $value = trim(str_replace($unit, '', $value));
-                                $id = $this->generateId($description);
-                                $sensors[$id] = $description;
-                                $states[$id] = $value;
-                            }
-
-                        }
-                    }
-
-                    $found = true;
-                }
-            }
-        }
-
-        return [
-            'found' => $found,
-            'sensors' => $sensors,
-            'states' => $states
-        ];
-    }
-
 
 }
